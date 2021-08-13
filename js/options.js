@@ -26,16 +26,16 @@ function storageSet(KEY, val){
     data[KEY] = val;
     return new Promise(resolve=>chrome.storage.local.set(data,resolve));
 }
-async function generatePayload(title, content){
-    let id = await storageGet(keyEnum.BLOGGER_ID);
-    console.log(id);    // debugging
+async function generatePayload(blogId, title, content){
     let json = {
         "kind": "blogger#post",
-        "blog":{id},
+        "blog":{
+            "id":blogId
+        },
         title,
         content
     };
-    return json;
+    return JSON.stringify(json);
 }
 /**
  * Method to get OAuth2 token, then automatically saves it to local storage (cache).
@@ -53,11 +53,8 @@ async function getTokenRemoteAndCache(){
  * Entry method to make Blogger post, using the post description as JSON body in `payload`.
  * Param: maxRetry: a number defining max retry count.
  */
-async function xhrWithAuth(payload, maxRetry) {
-    const TAG = 'xhrWithAuth';
-    var retry = true;
-    const POST_URL = `https://www.googleapis.com/blogger/v3/blogs/blogId/posts/`;
-    if(maxRetry<1){
+async function xhrWithAuth(postUrl, payload, maxRetry) {
+    if(maxRetry<0){
         console.log('Max retry reached. Stop making request');
         return;
     }
@@ -66,13 +63,21 @@ async function xhrWithAuth(payload, maxRetry) {
         token = await getTokenRemoteAndCache();     // initializes new token
     }
     try{    // sends POST request
-        let response = await fetch(POST_URL,fetchOptions);  // makes request and waits response
+        let fetchOptions = {
+            method:'POST',
+            headers:{
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: payload
+        }
+        let response = await fetch(postUrl,fetchOptions);  // makes request and waits response
         console.log('Server responded',response,'body',response.json());   // debugging
         if(response.status == 401){     // possibly token has expired
             console.log('Server responded code 401. Retrying with new token..');
             let token = await getTokenRemoteAndCache();     // gets new token
             console.log('New token:',token);
-            await xhrWithAuth(payload, maxRetry-1);     // retry
+            await xhrWithAuth(postUrl, payload, maxRetry-1);     // retry
         } else if(response.ok){
             console.log('Server sent "OK"');
         } else{
@@ -155,10 +160,13 @@ async function saveIdHandler(){
         setStatus('Ready', levelEnum.OK);
     }
 }
+function wait(msec){
+    return new Promise(resolve=>setTimeout(resolve,msec));
+}
 /**
  * Handles 'Start' button's logic
  */
-function startHandler(){
+async function startHandler(){
     let data = globalThis.data;
     let progress = globalThis.progress;
     if(!data){
@@ -171,7 +179,34 @@ function startHandler(){
     }
     // TODO: handles mechanism
     try{
-
+        let i = 0;
+        let n = data.length;
+        progress = setProgress(0);  // resets progress
+        setStatus('Posting..',levelEnum.INFO);
+        let tasks = [];
+        let maxRetry = 1;
+        let blogId = await storageGet(keyEnum.BLOGGER_ID);
+        if(!blogId){
+            throw 'Please set the blog ID first.';
+        }
+        const url = `https://www.googleapis.com/blogger/v3/blogs/${blogId}/posts/`;
+        while(i<n){
+            let k = Math.min(n,i+10);
+            let start = Date.now();
+            while(i<k){
+                let payload = generatePayload(blogId,data[i][0],data[i][1]);
+                tasks.push(xhrWithAuth(url,payload,maxRetry));
+                ++i;
+            }
+            await Promise.all(tasks);
+            progress+=100/(n/10);
+            setProgress(progress);
+            let elapsed = Date.now()-start;
+            let delay = Math.max(1,10000-elapsed);
+            await wait(delay);
+        }
+        setProgress(100);
+        setStatus('Ready',levelEnum.OK);
     } catch(e){
         setStatus(e,levelEnum.ERROR);
     }
