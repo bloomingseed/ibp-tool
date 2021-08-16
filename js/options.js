@@ -26,7 +26,7 @@ function storageSet(KEY, val){
     data[KEY] = val;
     return new Promise(resolve=>chrome.storage.local.set(data,resolve));
 }
-async function generatePayload(blogId, title, content){
+function generatePayload(blogId, title, content){
     let json = {
         "kind": "blogger#post",
         "blog":{
