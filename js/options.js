@@ -68,6 +68,7 @@ async function importData(file){
         setIsReady(false);  // sets status of not ready
         setStatus('Reading file..',levelEnum.INFO);     // sets status string
         let rows = (await (()=>new Promise((solve,rej)=>file.text().then(solve).catch(rej)))()).split('\n');    // extracts data by lines
+        // console.log(rows);
         globalThis.data = rows;     // saves imported data to global scope
         setIsReady(true);
         tbody.innerHTML = "";   // clears tbody
@@ -116,6 +117,20 @@ function isCreatePostUrl(url,output){
         return false;
     return true;
 }
+/**
+ * Checks if the url is for creating blog posts.
+ */
+function isIndexUrl(url,output){
+    if(typeof(url)!='string') 
+        return false;
+        // https://www.blogger.com/blog/posts/3218872346089355433
+    let pattern = /https:\/\/(www.)?blogger.com\/blog\/posts\/\d+$/;    // validates post and comment url with any parameters
+    let matches = url.match(pattern);
+    // console.log(TAG,url,"Regex matches: ",matches);
+    if(!matches) 
+        return false;
+    return true;
+}
 function getTabIdsList(){
     if(!globalThis.idsList){
         globalThis.idsList = [];
@@ -126,16 +141,33 @@ function onTabUpdatedListener(tabId,changeInfo,tab){
     const TAG = 'onTabUpdatedListener';
     console.log(TAG,`TabId ${tabId}, Url ${tab.url}: updated.`);
     let url = tab.url;
-    if(!isCreatePostUrl(url)){  // checks if the tab url isn't a create blogger post page
-        // TODO: checks if tabId is in globalThis.tabIdsList?removeIt;move to next item:return
-        return;
+    if(isCreatePostUrl(url)){  // checks if the tab url isn't a create blogger post page
+        console.log(TAG,'Found post url @',tabId);
+        chrome.scripting.executeScript({    // inject content.js script
+            target:{tabId},
+            files: ['js/post.js']
+        });
+        console.log(TAG,'post.js script injected.',tabId);        
+    } else if(isIndexUrl(url)){     // checks if url is blogger admin page
+        let options = getTabIdsList()[tabId];
+        if(options){    // checks if tabId is registered with options
+            if(options.isDone==null){   // checks if it's freshly new
+                // options.isDone = false;
+                console.log(TAG,'Found new blogger index page.',tabId,url);
+                // inject index.js
+                chrome.scripting.executeScript({    // inject content.js script
+                    target:{'tabId':tab.id},
+                    files: ['js/index.js']
+                });
+            } else if(options.isDone==false){   // checks if it is resolvable
+                // TODO: resolve
+                console.log(TAG,'Found resolvable task.',tabId,url);
+                // console.log(options.resolve);   // debugging
+                options.resolve();
+            }
+        }
     }
-    console.log(TAG,'Found post url @',tabId);
-    chrome.scripting.executeScript({    // inject content.js script
-        target:{tabId},
-        files: ['js/post.js']
-    });
-    console.log(TAG,'post.js script injected.',tabId);
+    
 }
 
 function sendMessageContentScript(tabId, message){
@@ -154,17 +186,9 @@ function onTabMessageListener(request, sender, sendResponse){
     let TAG = "onTabMessageListener";
     let tabId = sender.tab.id;
     console.log(TAG,`TabId ${tabId}: sent: `,request); 
-    //TODO: gets param string and sends to content script at this tabId
-
-    // if(request.type=='ready'){  
-    //     // sends params to content script
-    //     let params = globalThis.data[getDictionary()[tabId].i].split('|');  // gets params at index `i` and split it 
-    //     // let params = {foo:'bar'};
-    //     sendMessageContentScript(tabId,params);     // sends params to content script 
-    // }  else if(request.type=='done'){
-    //     console.log('one task finished');
-    //     getDictionary()[tabId].resolve();
-    // }
+    let config = getTabIdsList()[tabId];  // gets arguments assigned to this tab id
+    sendMessageContentScript(tabId,config.data);   // sends arguments to content script
+    config.isDone = false;
 }
 /**
  * Sends blog ID to background service and cache it
@@ -219,15 +243,11 @@ async function startHandler(){
         for(let j = i; j<Math.min(i+batchSize,n); ++j){
             let wt = await createWindowTab(url);    // creates tab in new window
             let tab = wt.tabs[0];   // gets first tab
-            
-            
-            // chrome.scripting.executeScript({    // inject content.js script
-            //     target:{'tabId':tab.id},
-            //     files: ['js/index.js']
-            // });
+            let args = data[j].split('|');
+            args[1] = args[1][args[1].length-1]=='\r'?args[1].substring(0,args[1].length-1):args[1];
             tabIdsList[tab.id] = {
-                'isDone':false,
-                'data':JSON.stringify(data[j].split('|'))
+                'isDone':null,
+                'data':data[j].split('|')
             }
             let resolve = undefined;
             let p = new Promise(r=>{
@@ -240,6 +260,10 @@ async function startHandler(){
             tabIdsList[tab.id].resolve = resolve;
             console.log(tabIdsList[tab.id]);    // debugging
             tasks.push(p);
+            // chrome.scripting.executeScript({    // inject content.js script
+            //     target:{'tabId':tab.id},
+            //     files: ['js/index.js']
+            // });
         }
         console.log(tasks);
         // await wait(5000);

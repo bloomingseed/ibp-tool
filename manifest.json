@@ -22,7 +22,7 @@
         "scripting",
         "storage"
     ],
-    "host_permissions":[
+    "host_permissions": [
         "https://www.blogger.com/*"
     ]
 }
