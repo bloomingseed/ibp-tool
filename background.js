@@ -5,4 +5,5 @@ function extensionClickListener(){
         window.open(chrome.runtime.getURL('options.html'));
     }
 }
+
 chrome.action.onClicked.addListener(extensionClickListener);

@@ -4,7 +4,7 @@ const importBtn = document.querySelector('#btn-import');
 const idInput = document.querySelector('#input-blog-id');
 const saveIdBtn = document.querySelector('#btn-save-blog-id');
 const startBtn = document.querySelector('#btn-start');
-const table = document.querySelector('#table-data>tbody');
+const tbody = document.querySelector('#table-data>tbody');
 const statusDiv = document.querySelector('#div-status');
 const statusDivParent = document.querySelector('#div-status-parent');
 const levelEnum = {
@@ -14,10 +14,9 @@ const levelEnum = {
     'OK':'OK'
 }
 const keyEnum = {
-    "BLOGGER_ID":"BLOGGER_ID",
-    "OAUTH_TOKEN":"TOKEN"
+    "BLOGGER_ID":"BLOGGER_ID"
 }
-// BACKGROUND METHODS
+// METHODS
 function storageGet(KEY){
     return new Promise(resolve=>chrome.storage.local.get(KEY,obj=>resolve(obj[KEY])));
 }
@@ -26,74 +25,14 @@ function storageSet(KEY, val){
     data[KEY] = val;
     return new Promise(resolve=>chrome.storage.local.set(data,resolve));
 }
-function generatePayload(blogId, title, content){
-    let json = {
-        "kind": "blogger#post",
-        "blog":{
-            "id":blogId
-        },
-        title,
-        content
-    };
-    return JSON.stringify(json);
-}
-/**
- * Method to get OAuth2 token, then automatically saves it to local storage (cache).
- * Returns the OAuth2 token.
- */
-async function getTokenRemoteAndCache(){
-    return new Promise(resolve=>{
-        chrome.identity.getAuthToken({interactive:true}, token=>{
-            storageSet(keyEnum.OAUTH_TOKEN,token);  // caches token
-            resolve(token);     // returns token
-        });
-    });
-}
-/**
- * Entry method to make Blogger post, using the post description as JSON body in `payload`.
- * Param: maxRetry: a number defining max retry count.
- */
-async function xhrWithAuth(postUrl, payload, maxRetry) {
-    if(maxRetry<0){
-        console.log('Max retry reached. Stop making request');
-        return;
-    }
-    let token = await storageGet(keyEnum.OAUTH_TOKEN);  // retrieves the cached token
-    if(!token){
-        token = await getTokenRemoteAndCache();     // initializes new token
-    }
-    try{    // sends POST request
-        let fetchOptions = {
-            method:'POST',
-            headers:{
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
-            body: payload
-        }
-        let response = await fetch(postUrl,fetchOptions);  // makes request and waits response
-        console.log('Server responded',response,'body',response.json());   // debugging
-        if(response.status == 401){     // possibly token has expired
-            console.log('Server responded code 401. Retrying with new token..');
-            let token = await getTokenRemoteAndCache();     // gets new token
-            console.log('New token:',token);
-            await xhrWithAuth(postUrl, payload, maxRetry-1);     // retry
-        } else if(response.ok){
-            console.log('Server sent "OK"');
-        } else{
-            console.log('Request failed with unknown solution');
-        }
-        return response;
-    } catch(e){     // catches failing to make POST request
-        console.log('Client failed to send request. Error:', e);
-    }
-}
-// 4 options.html
 function setProgress(progress){
     progressBar.style.width = progress+'%';
     globalThis.progress = progress;
     return progress;
 }
+/**
+ * Sets the status value and color based on level enum
+ */
 function setStatus(val,level){
     const levelMapping = {
         'INFO':'bg-info',
@@ -106,47 +45,127 @@ function setStatus(val,level){
     clist.replace(clist[0],levelMapping[level]);    // replaces first class value with one from level mapping
 }
 /**
- * Method to extract data from a `file` and append them to table.
+ * Sets ready state.
+ * Set the `isReady` variable in global scope and modify availability of start button.
+ */
+function setIsReady(val){
+    globalThis.isReady =  val;  // sets global variable
+    if(val){
+        startBtn.removeAttribute('disabled');   // enables start button
+    } else{
+        startBtn.setAttribute('disabled',true); // disables start button
+    }
+}
+function wait(sec){
+    return new Promise(resolve=>setTimeout(resolve,sec*1000));
+}
+/**
+ * Extracts data from a `file` and overwrite them to table and sets the global data variable.
  * Each file contains each row = each post; each row has 2 fields separated by '|'.
  */
 async function importData(file){
     try{
-        let wait = sec=>new Promise(resolve=>setTimeout(resolve,sec*1000));
-        setStatus('Reading file..',levelEnum.INFO);
-        let rows = (await (()=>new Promise((solve,rej)=>file.text().then(solve).catch(rej)))()).split('\n');
-        setStatus(`Parsing ${rows.length} rows..`,levelEnum.INFO);
+        setIsReady(false);  // sets status of not ready
+        setStatus('Reading file..',levelEnum.INFO);     // sets status string
+        let rows = (await (()=>new Promise((solve,rej)=>file.text().then(solve).catch(rej)))()).split('\n');    // extracts data by lines
+        globalThis.data = rows;     // saves imported data to global scope
+        setIsReady(true);
+        tbody.innerHTML = "";   // clears tbody
+        setStatus(`Parsing ${rows.length} rows..`,levelEnum.INFO);  // sets status string
         let count = 0;
         let progress = setProgress(0);  // resets progress
+        // rendering rows
         for(let row of rows){
             ++count;
             let tr = document.createElement('tr');
             let postData = row.split('|');
-            rows[count-1] = postData;
+            // rows[count-1] = postData;
             await wait(0.001);
             if(postData.length!=2){
                 setStatus(`Skipped row #${count}: Wrong format data.`,levelEnum.WARNING);
                 continue;
             }
             postData.unshift(count);    // adds the count to post data
+            // adding data to table row
             for(let i = 0; i<postData.length; ++i){
                 let td = document.createElement('td');
                 td.setAttribute('scope','row');
                 td.innerText = postData[i];
                 tr.appendChild(td);
             }
-            table.appendChild(tr);
-            postData.shift();   // removes the count data
-            progress+=100/rows.length;
+            tbody.appendChild(tr);  // appends row to table
+            progress+=100/rows.length;  // increases unit progress
             setProgress(Number.parseInt(progress));
         }
         setStatus('Ready',levelEnum.OK);
         setProgress(100);   // fills the odds percentage
-        globalThis.data = rows;
     }catch(e){
         setStatus(e,levelEnum.ERROR);
     }
 }
-// EVENTS HANDLING
+/**
+ * Checks if the url is for creating blog posts.
+ */
+function isCreatePostUrl(url,output){
+    if(typeof(url)!='string') 
+        return false;
+    let pattern = /https:\/\/(www.)?blogger.com\/blog\/post\/edit\/\d+\/\d+$/;    // validates post and comment url with any parameters
+    let matches = url.match(pattern);
+    // console.log(TAG,url,"Regex matches: ",matches);
+    if(!matches) 
+        return false;
+    return true;
+}
+function getTabIdsList(){
+    if(!globalThis.idsList){
+        globalThis.idsList = [];
+    }
+    return globalThis.idsList;
+}
+function onTabUpdatedListener(tabId,changeInfo,tab){
+    const TAG = 'onTabUpdatedListener';
+    console.log(TAG,`TabId ${tabId}, Url ${tab.url}: updated.`);
+    let url = tab.url;
+    if(!isCreatePostUrl(url)){  // checks if the tab url isn't a create blogger post page
+        // TODO: checks if tabId is in globalThis.tabIdsList?removeIt;move to next item:return
+        return;
+    }
+    console.log(TAG,'Found post url @',tabId);
+    chrome.scripting.executeScript({    // inject content.js script
+        target:{tabId},
+        files: ['js/post.js']
+    });
+    console.log(TAG,'post.js script injected.',tabId);
+}
+
+function sendMessageContentScript(tabId, message){
+    chrome.tabs.sendMessage(tabId, message);
+}
+async function createWindowTab(url){
+    // return await chrome.tabs.create({url});
+    // return window.open(url,'_blank','width:500,height:300');
+    return await chrome.windows.create({url,'width':768,'height':768});
+}
+async function closeWindowTab(windowId){
+    await chrome.windows.remove(windowId);
+}
+
+function onTabMessageListener(request, sender, sendResponse){
+    let TAG = "onTabMessageListener";
+    let tabId = sender.tab.id;
+    console.log(TAG,`TabId ${tabId}: sent: `,request); 
+    //TODO: gets param string and sends to content script at this tabId
+
+    // if(request.type=='ready'){  
+    //     // sends params to content script
+    //     let params = globalThis.data[getDictionary()[tabId].i].split('|');  // gets params at index `i` and split it 
+    //     // let params = {foo:'bar'};
+    //     sendMessageContentScript(tabId,params);     // sends params to content script 
+    // }  else if(request.type=='done'){
+    //     console.log('one task finished');
+    //     getDictionary()[tabId].resolve();
+    // }
+}
 /**
  * Sends blog ID to background service and cache it
  */
@@ -158,57 +177,6 @@ async function saveIdHandler(){
         setStatus('Saving blog ID as '+id+'..', levelEnum.INFO);
         await storageSet(keyEnum.BLOGGER_ID,id)
         setStatus('Ready', levelEnum.OK);
-    }
-}
-function wait(msec){
-    return new Promise(resolve=>setTimeout(resolve,msec));
-}
-/**
- * Handles 'Start' button's logic
- */
-async function startHandler(){
-    let data = globalThis.data;
-    let progress = globalThis.progress;
-    if(!data){
-        setStatus('Data not found. Please import data first.',levelEnum.ERROR);
-        return;
-    }
-    if(progress!=100){
-        setStatus('Importing not done yet. Please hold on.',levelEnum.ERROR);
-        return;
-    }
-    // TODO: handles mechanism
-    try{
-        let i = 0;
-        let n = data.length;
-        progress = setProgress(0);  // resets progress
-        setStatus('Posting..',levelEnum.INFO);
-        let tasks = [];
-        let maxRetry = 1;
-        let blogId = await storageGet(keyEnum.BLOGGER_ID);
-        if(!blogId){
-            throw 'Please set the blog ID first.';
-        }
-        const url = `https://www.googleapis.com/blogger/v3/blogs/${blogId}/posts/`;
-        while(i<n){
-            let k = Math.min(n,i+10);
-            let start = Date.now();
-            while(i<k){
-                let payload = generatePayload(blogId,data[i][0],data[i][1]);
-                tasks.push(xhrWithAuth(url,payload,maxRetry));
-                ++i;
-            }
-            await Promise.all(tasks);
-            progress+=100/(n/10);
-            setProgress(progress);
-            let elapsed = Date.now()-start;
-            let delay = Math.max(1,10000-elapsed);
-            await wait(delay);
-        }
-        setProgress(100);
-        setStatus('Ready',levelEnum.OK);
-    } catch(e){
-        setStatus(e,levelEnum.ERROR);
     }
 }
 function statusDivMouseEnterHandler(){
@@ -226,6 +194,59 @@ async function windowLoadHandler(){
         idInput.value = id;
     }
 }
+function wait(msec){
+    return new Promise(resolve=>setTimeout(resolve,msec));
+}
+
+/**
+ * Handles 'Start' button's logic
+ */
+async function startHandler(){
+    let data = globalThis.data;     // retrieves global scope data from importData method
+    if(!data){
+        setStatus('Data not found. Please import data first.',levelEnum.ERROR);
+        return;
+    }
+    setStatus('Posting..', levelEnum.INFO);
+    let n = data.length;    // gets number of rows (lines) in data
+    let blogId = await storageGet(keyEnum.BLOGGER_ID);
+    let url = `https://www.blogger.com/blog/posts/${blogId}`;  // direct access to blog home page
+    // let url = "https://www.blogger.com";
+    let batchSize = 4;
+    let tabIdsList = getTabIdsList();  // gets list of working tab ids
+    for(let i = 0; i<n; i+=batchSize){
+        let tasks = [];
+        for(let j = i; j<Math.min(i+batchSize,n); ++j){
+            let wt = await createWindowTab(url);    // creates tab in new window
+            let tab = wt.tabs[0];   // gets first tab
+            
+            
+            // chrome.scripting.executeScript({    // inject content.js script
+            //     target:{'tabId':tab.id},
+            //     files: ['js/index.js']
+            // });
+            tabIdsList[tab.id] = {
+                'isDone':false,
+                'data':JSON.stringify(data[j].split('|'))
+            }
+            let resolve = undefined;
+            let p = new Promise(r=>{
+                resolve = ()=>{
+                    closeWindowTab(wt.id);
+                    tabIdsList[tab.id].isDone = true;
+                    r();
+                };
+            });
+            tabIdsList[tab.id].resolve = resolve;
+            console.log(tabIdsList[tab.id]);    // debugging
+            tasks.push(p);
+        }
+        console.log(tasks);
+        // await wait(5000);
+        await Promise.all(tasks);   // waits for all tasks to finish
+    }
+    setStatus('Ready',levelEnum.OK);
+}
 // EVENTS REGISTERING
 importBtn.addEventListener('change',async function(){ await importData(this.files[0])},false);
 saveIdBtn.addEventListener('click',saveIdHandler);
@@ -233,3 +254,10 @@ startBtn.addEventListener('click',startHandler);
 statusDivParent.addEventListener('mouseenter',statusDivMouseEnterHandler);
 statusDivParent.addEventListener('mouseleave',statusDivMouseLeaveHandler);
 window.addEventListener('load',windowLoadHandler);
+chrome.tabs.onUpdated.addListener(onTabUpdatedListener);
+chrome.runtime.onMessage.addListener(function(req,s,res){
+    if(s.tab) {     // checks if message comes from a tab
+        onTabMessageListener(req,s,res)
+    } 
+    return true;
+});

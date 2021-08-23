@@ -18,14 +18,11 @@
     },
     "options_page": "options.html",
     "permissions":[
-        "storage",
-        "identity"
+        "tabs",
+        "scripting",
+        "storage"
     ],
-    "oauth2": {
-        "client_id": "548512329264-51k74inm1vefgtk2egatt4h01g9i2a5q.apps.googleusercontent.com",
-        "scopes": [
-            "https://www.googleapis.com/auth/blogger"
-        ]
-    },
-    "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAr8XQxvDjufe0CNE28UlmEusAPRnJj+cPoNzmuQRYSBFUL47vh3xmnHP+1qini8/dZAb9HCDKzMScuoQOEjbYZ0dufBQ+pzEiHiQ8MpYxxhCFaO+0meInTkoqGmZh25v8aYqIW/8OxuStmXBOIW+f8K5TQO9HnwKZSkGb/Z6Uz25G0m9iMBkygXkX28dhWPBjg/9LJZ8Yj3UeyS+bgMmpOd9KFlLT9lLRN6wTlHMlYAByMjKCPXy8jw4p3wfOW8oHbHg7m4ThI4mExIlkkgqrnv8EBGRflpi66C6hMu2sL5d9Ek87eDquov3141TNgjNp3R45iBoT98JExhe0B9QyzwIDAQAB"
+    "host_permissions":[
+        "https://www.blogger.com/*"
+    ]
 }
