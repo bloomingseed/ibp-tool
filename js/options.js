@@ -40,7 +40,7 @@ function setStatus(val,level){
         'ERROR':'bg-danger',
         'OK':'bg-success'
     }
-    statusDiv.innerHTML = val+'\n'+statusDiv.innerHTML;
+    statusDiv.innerHTML = `[${new Date()}] `+val+'\n'+statusDiv.innerHTML;
     let clist = statusDivParent.classList;
     clist.replace(clist[0],levelMapping[level]);    // replaces first class value with one from level mapping
 }
@@ -231,7 +231,7 @@ async function startHandler(){
         setStatus('Data not found. Please import data first.',levelEnum.ERROR);
         return;
     }
-    setStatus('Posting..', levelEnum.INFO);
+    setStatus(`Posting..`, levelEnum.INFO);
     let n = data.length;    // gets number of rows (lines) in data
     let blogId = await storageGet(keyEnum.BLOGGER_ID);
     let url = `https://www.blogger.com/blog/posts/${blogId}`;  // direct access to blog home page
@@ -240,6 +240,7 @@ async function startHandler(){
     let tabIdsList = getTabIdsList();  // gets list of working tab ids
     for(let i = 0; i<n; i+=batchSize){
         let tasks = [];
+        setStatus(`Posting (${i}/${n})`);
         for(let j = i; j<Math.min(i+batchSize,n); ++j){
             let wt = await createWindowTab(url);    // creates tab in new window
             let tab = wt.tabs[0];   // gets first tab
